@@ -1,0 +1,57 @@
+name: Build and Deploy — product-service
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven   # Caches ~/.m2/repository — subsequent runs skip re-downloading deps
+
+      - name: Run unit tests
+        run: mvn test
+
+      - name: Build JAR
+        run: mvn package -DskipTests
+
+      - name: Log in to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_LOGIN_SERVER }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          # Tag with both the git SHA (immutable, traceable) and latest (convenient)
+          tags: |
+            ${{ secrets.ACR_LOGIN_SERVER }}/bestbuy-product-service:${{ github.sha }}
+            ${{ secrets.ACR_LOGIN_SERVER }}/bestbuy-product-service:latest
+
+      - name: Set AKS context
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          cluster-name: ${{ secrets.AZURE_CLUSTER_NAME }}
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to AKS
+        run: |
+          kubectl set image deployment/product-service \
+            product-service=${{ secrets.ACR_LOGIN_SERVER }}/bestbuy-product-service:${{ github.sha }} \
+            -n bestbuy
+          # Wait for the rollout to complete — fails the pipeline if deployment hangs
+          kubectl rollout status deployment/product-service -n bestbuy --timeout=120s
