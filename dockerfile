@@ -22,7 +22,7 @@ FROM eclipse-temurin:25-jre
 WORKDIR /app
 
 # Create a non-root user — running as root in a container is a security risk
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+RUN groupadd -r appgroup && useradd -r -g appgroup appuser
 USER appuser
 
 COPY --from=build /app/target/*.jar app.jar
